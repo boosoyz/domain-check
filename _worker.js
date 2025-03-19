@@ -1,13 +1,16 @@
 // 定义外部变量
-let sitename = "域名监控"; //变量名SITENAME，自定义站点名称，默认为“域名监控”
-let domains = ""; //变量名DOMAINS，填入域名信息json文件直链，必须设置的变量
-let tgid = ""; //变量名TGID，填入TG机器人ID，不需要提醒则不填
-let tgtoken = ""; //变量名TGTOKEN，填入TG的TOKEN，不需要提醒则不填
-let days = 7; //变量名DAYS，提前几天发送TG提醒，默认为7天，必须为大于0的整数
+let sitename = "域名监控"; // 变量名 SITENAME，自定义站点名称，默认为“域名监控”
+let domains = ""; // 变量名 DOMAINS，填入域名信息 json 文件直链，必须设置的变量
+let tgid = ""; // 变量名 TGID，填入 TG 机器人 ID，不需要提醒则不填
+let tgtoken = ""; // 变量名 TGTOKEN，填入 TG 的 TOKEN，不需要提醒则不填
+let TelegramURL = "https://api.telegram.org"; // Telegram API 服务器地址
+let pushPlusToken = ""; // 变量名 PUSHPLUS_TOKEN，填入 PushPlus 令牌，不需要提醒则不填
+let pushPlusURL = "https://www.pushplus.plus/send"; // PushPlus 自定义推送 API 地址
+let days = 7; // 变量名 DAYS，提前几天发送 TG 提醒，默认为 7 天，必须为大于 0 的整数
 
 async function sendtgMessage(message, tgid, tgtoken) {
   if (!tgid || !tgtoken) return;
-  const url = `https://api.telegram.org/bot${tgtoken}/sendMessage`;
+  const url = `${TelegramURL}/bot${tgtoken}/sendMessage`; // 使用外部变量 TelegramURL
   const params = {
     chat_id: tgid,
     text: message,
@@ -23,13 +26,51 @@ async function sendtgMessage(message, tgid, tgtoken) {
   }
 }
 
+async function sendPushPlusMessage(message, pushPlusToken) {
+  if (!pushPlusToken) return;
+  const params = {
+    token: pushPlusToken,
+    title: "域名到期提醒",
+    content: message,
+    template: "html",
+  };
+  try {
+    await fetch(pushPlusURL, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(params),
+    });
+  } catch (error) {
+    console.error("PushPlus 消息推送失败:", error);
+  }
+}
+
+async function handleVisit(request) {
+  // 获取访问者的 IP 和国家信息
+  const ip = request.headers.get('CF-Connecting-IP') || 'Unknown IP';
+  const country = request.cf ? request.cf.country : 'Unknown Country';
+
+  // 构建消息内容
+  const message = `有人访问了 \nIP: ${ip}\n国家: ${country}`;
+
+  // 发送消息到 Telegram
+  await sendtgMessage(message, tgid, tgtoken);
+
+}
+
+
 export default {
   async fetch(request, env) {
     sitename = env.SITENAME || sitename;
     domains = env.DOMAINS || domains;
     tgid = env.TGID || tgid;
     tgtoken = env.TGTOKEN || tgtoken;
+    TelegramURL = env.TelegramURL || TelegramURL; // 允许通过环境变量修改 Telegram API 地址
+    pushPlusToken = env.PUSHPLUS_TOKEN || pushPlusToken;
     days = Number(env.DAYS || days);
+
+    // 在请求处理时调用访问记录的函数  获取访问者的 IP 和国家信息
+    await handleVisit(request);
 
     if (!domains) {
       return new Response("DOMAINS 环境变量未设置", { status: 500 });
@@ -54,7 +95,8 @@ export default {
           const lastSentDate = await env.DOMAINS_TG_KV.get(domain.domain); // 以域名为键获取上次发送时间
           
           if (lastSentDate !== today) { // 检查是否已经在今天发送过
-            await sendtgMessage(message, tgid, tgtoken); // 发送通知
+            await sendtgMessage(message, tgid, tgtoken); // 发送 Telegram
+            await sendPushPlusMessage(message, pushPlusToken); // 发送 PushPlus
             await env.DOMAINS_TG_KV.put(domain.domain, today); // 更新发送日期
           }
         }
